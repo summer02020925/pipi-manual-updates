@@ -33,9 +33,9 @@ def inputs(env):
     return {'version': version, 'commit': commit, 'blob': blob, 'digest': digest,
             'size': size, 'asset': f'PipiManualFresh-{version}-win-x64.zip'}
 
-def read_json(path):
+def read_json(path, limit=65536):
     data = Path(path).read_bytes()
-    require(0 < len(data) <= 65536)
+    require(0 < len(data) <= limit)
     return json.loads(data)
 
 def commit_tree(data, cfg):
@@ -78,6 +78,28 @@ def validate_package(path, cfg):
         require(total <= MAX_EXPANDED)
     # The existing signer subsequently performs the full independent ZIP/PE/key/feed validation.
 
+def release_page(data):
+    require(isinstance(data, list) and len(data) <= 10)
+    require(all(isinstance(item, dict) for item in data))
+    return len(data)
+
+def find_draft(pages, cfg):
+    # Exhaust bounded pagination before choosing: never silently accept ambiguous tags.
+    require(1 <= len(pages) <= 20)
+    require(all(release_page(p) == 10 for p in pages[:-1]))
+    require(release_page(pages[-1]) < 10)
+    matches, seen = [], set()
+    for page in pages:
+        for item in page:
+            ident = item.get('id')
+            require(type(ident) is int and ident > 0 and ident not in seen)
+            seen.add(ident)
+            if item.get('tag_name') == 'v' + cfg['version']:
+                matches.append(item)
+    require(len(matches) == 1)
+    validate_release(matches[0], cfg)
+    return str(matches[0]['id'])
+
 def validate_release(data, cfg):
     require(isinstance(data, dict) and data.get('draft') is True and data.get('tag_name') == 'v' + cfg['version'])
     assets = data.get('assets')
@@ -101,8 +123,15 @@ def main():
         validate_tree(read_json(sys.argv[2]), cfg)
     elif mode == 'package':
         validate_package(sys.argv[2], cfg)
+    elif mode == 'release-page':
+        print(release_page(read_json(sys.argv[2], 1048576)))
+    elif mode == 'find-draft':
+        print(find_draft([read_json(p, 1048576) for p in sys.argv[2:]], cfg))
     elif mode == 'release':
-        print(validate_release(read_json(sys.argv[2]), cfg))
+        data = read_json(sys.argv[2])
+        require(len(sys.argv) == 4 and re.fullmatch(r'[1-9][0-9]*', sys.argv[3]))
+        require(type(data.get('id')) is int and str(data['id']) == sys.argv[3])
+        print(validate_release(data, cfg))
     else:
         require(False)
 
