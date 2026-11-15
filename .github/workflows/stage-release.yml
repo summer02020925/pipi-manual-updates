@@ -43,7 +43,6 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_HOST: github.com
       GH_DEBUG: ''
-      GH_CONFIG_DIR: ${{ runner.temp }}/pipi-stage-gh
     steps:
       # Always use reviewed main workflow/helper, NEVER execute/check out staging content.
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -51,6 +50,8 @@ jobs:
           persist-credentials: false
       - name: Verify immutable staging commit and bounded binary
         shell: bash
+        env:
+          GH_CONFIG_DIR: ${{ runner.temp }}/pipi-stage-gh
         run: |
           set -euo pipefail
           asset=$(python release-tools/StageRelease.py inputs)
@@ -65,6 +66,8 @@ jobs:
           python release-tools/StageRelease.py package "payload/$asset"
       - name: Upload only to the existing draft without overwrite
         shell: bash
+        env:
+          GH_CONFIG_DIR: ${{ runner.temp }}/pipi-stage-gh
         run: |
           set -euo pipefail
           asset=$(python release-tools/StageRelease.py inputs)
