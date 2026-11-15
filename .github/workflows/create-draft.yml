@@ -71,13 +71,31 @@ jobs:
           gh api --hostname github.com --method POST repos/summer02020925/pipi-manual-updates/releases --input metadata/create.json | head -c 65537 > metadata/created.json
           phase=create-response
           draft_id=$(python3 release-tools/CreateDraft.py created metadata/created.json)
-          phase=recheck-fetch
-          gh api --hostname github.com "repos/summer02020925/pipi-manual-updates/releases/$draft_id" | head -c 65537 > metadata/rechecked.json
-          phase=recheck-validate
-          python3 release-tools/CreateDraft.py created metadata/rechecked.json "$draft_id"
-          check_tag_absent after
-          list_releases after
-          phase=after-inventory
-          python3 release-tools/CreateDraft.py after-inventory "$draft_id" "${pages[@]}"
+          verified=false
+          for attempt in 1 2 3 4; do
+            phase=recheck-fetch
+            gh api --hostname github.com "repos/summer02020925/pipi-manual-updates/releases/$draft_id" | head -c 65537 > metadata/rechecked.json
+            phase=recheck-validate
+            python3 release-tools/CreateDraft.py created metadata/rechecked.json "$draft_id"
+            check_tag_absent after
+            list_releases after
+            phase=after-inventory
+            if python3 release-tools/CreateDraft.py after-inventory "$draft_id" "${pages[@]}"; then
+              verified=true
+              break
+            else
+              verification_status=$?
+              # Only a complete, valid inventory temporarily missing this exact new draft is retryable.
+              # Auth errors, tag existence, duplicate IDs, wrong target/assets/version all stop immediately.
+              if [ "$verification_status" -ne 75 ] || [ "$attempt" -eq 4 ]; then
+                echo 'Post-create verification did not succeed; retain draft for inspection. No POST retry.' >&2
+                exit 1
+              fi
+              phase=visibility-backoff
+              printf 'Retrying read-only post-create visibility check, attempt %s of 4.\n' "$((attempt+1))"
+              sleep "$((1 << (attempt-1)))"
+            fi
+          done
+          [ "$verified" = true ]
           echo "Verified empty draft release ID: $draft_id"
           echo 'No assets, signing key, publication or latest-release change used.'
