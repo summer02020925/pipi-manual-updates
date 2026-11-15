@@ -107,4 +107,5 @@ jobs:
           test "$uploaded" != absent
           gh api --hostname github.com -H 'Accept: application/octet-stream' "repos/summer02020925/pipi-manual-updates/releases/assets/$uploaded" | head -c "$((PACKAGE_SIZE + 1))" > "verify/$asset"
           python release-tools/StageRelease.py package "verify/$asset"
+          echo "Verified draft release ID: $release_id"
           echo 'Draft asset bytes verified. Signing and publication are separate manual workflow actions.'
