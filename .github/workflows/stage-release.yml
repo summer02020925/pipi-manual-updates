@@ -1,5 +1,8 @@
 name: Stage reviewed binary release
 on:
+  push:
+    branches: [main]
+    paths: [release-control/stage.json]
   workflow_dispatch:
     inputs:
       version:
@@ -29,17 +32,12 @@ concurrency:
   cancel-in-progress: false
 jobs:
   stage:
-    if: github.repository == 'summer02020925/pipi-manual-updates' && github.ref == 'refs/heads/main'
+    if: github.repository == 'summer02020925/pipi-manual-updates' && github.ref == 'refs/heads/main' && github.event.deleted != true
     runs-on: windows-2022
     timeout-minutes: 10
     permissions:
       contents: write
     env:
-      VERSION: ${{ inputs.version }}
-      STAGING_COMMIT: ${{ inputs.staging_commit }}
-      BLOB_SHA: ${{ inputs.blob_sha }}
-      PACKAGE_SHA256: ${{ inputs.package_sha256 }}
-      PACKAGE_SIZE: ${{ inputs.package_size }}
       GH_TOKEN: ${{ github.token }}
       GH_HOST: github.com
       GH_DEBUG: ''
@@ -47,7 +45,17 @@ jobs:
       # Always use reviewed main workflow/helper, NEVER execute/check out staging content.
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Read explicit reviewed stage request
+        shell: bash
+        env:
+          RAW_VERSION: ${{ inputs.version }}
+          RAW_PACKAGE_SHA256: ${{ inputs.package_sha256 }}
+          RAW_PACKAGE_SIZE: ${{ inputs.package_size }}
+          RAW_STAGING_COMMIT: ${{ inputs.staging_commit }}
+          RAW_BLOB_SHA: ${{ inputs.blob_sha }}
+        run: python release-tools/ReleaseRequest.py stage
       - name: Verify immutable staging commit and bounded binary
         shell: bash
         env:
