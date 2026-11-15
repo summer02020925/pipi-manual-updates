@@ -1,0 +1,68 @@
+name: Create explicitly requested empty draft
+on:
+  push:
+    branches: [main]
+    paths: [release-control/create-draft.json]
+permissions:
+  contents: read
+concurrency:
+  group: pipi-production-release
+  cancel-in-progress: false
+jobs:
+  create-draft:
+    if: github.repository == 'summer02020925/pipi-manual-updates' && github.ref == 'refs/heads/main' && github.event.deleted != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Validate explicit version request
+        run: python3 release-tools/CreateDraft.py request
+      - name: Check absence and create only an empty draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_HOST: github.com
+          GH_DEBUG: ''
+          GH_CONFIG_DIR: ${{ runner.temp }}/pipi-create-draft-gh
+        run: |
+          set -euo pipefail
+          mkdir metadata
+          list_releases() {
+            local prefix="$1" page file count
+            pages=()
+            for page in $(seq 1 20); do
+              file="metadata/$prefix-$page.json"
+              gh api --hostname github.com "repos/summer02020925/pipi-manual-updates/releases?per_page=10&page=$page" | head -c 1048577 > "$file"
+              count=$(python3 release-tools/CreateDraft.py page "$file")
+              pages+=("$file")
+              if [ "$count" -lt 10 ]; then break; fi
+            done
+          }
+          list_releases before
+          python3 release-tools/CreateDraft.py inventory "${pages[@]}"
+          check_tag_absent() {
+            local phase="$1"
+            # gh returns nonzero for expected HTTP404; parser distinguishes that
+            # exact response from auth/network/other failures and existing tags.
+            if gh api --hostname github.com --include "repos/summer02020925/pipi-manual-updates/git/ref/tags/v$DRAFT_VERSION" 2> "metadata/tag-$phase.stderr" | head -c 65537 > "metadata/tag-$phase.http"; then :; else :; fi
+            python3 release-tools/CreateDraft.py tag-absent "metadata/tag-$phase.http"
+          }
+          check_tag_absent before
+          gh api --hostname github.com repos/summer02020925/pipi-manual-updates/git/ref/heads/main | head -c 65537 > metadata/main.json
+          python3 release-tools/CreateDraft.py main metadata/main.json
+          python3 release-tools/CreateDraft.py payload metadata/create.json
+          # The ONLY mutation: one POST for an empty, unpublished draft. Never PATCH/delete/upload/sign.
+          gh api --hostname github.com --method POST repos/summer02020925/pipi-manual-updates/releases --input metadata/create.json | head -c 65537 > metadata/created.json
+          draft_id=$(python3 release-tools/CreateDraft.py created metadata/created.json)
+          gh api --hostname github.com "repos/summer02020925/pipi-manual-updates/releases/$draft_id" | head -c 65537 > metadata/rechecked.json
+          python3 release-tools/CreateDraft.py created metadata/rechecked.json "$draft_id"
+          check_tag_absent after
+          list_releases after
+          python3 release-tools/CreateDraft.py after-inventory "$draft_id" "${pages[@]}"
+          echo "Verified empty draft release ID: $draft_id"
+          echo 'No assets, signing key, publication or latest-release change used.'
