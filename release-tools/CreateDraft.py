@@ -40,6 +40,16 @@ def inventory(pages,v,expected_id=None):
                 require(tag.startswith('v'));require(version(tag[1:])<version(v))
     if expected_id is None:require(not matches)
     else:require(len(matches)==1 and matches[0].get('id')==int(expected_id) and matches[0].get('draft') is True)
+class RetryableVisibility(Exception):pass
+def post_inventory(pages,v,sha,expected_id):
+    # First validate pagination/types/uniqueness/version floor without weakening any guard.
+    matches=[item for p in pages for item in p if isinstance(item,dict) and item.get('tag_name')=='v'+v]
+    if not matches:
+        inventory(pages,v) # An otherwise-valid complete list, lacking only this new draft.
+        require(not any(item.get('id')==int(expected_id) for p in pages for item in p))
+        raise RetryableVisibility()
+    inventory(pages,v,expected_id)
+    created(matches[0],v,sha,str(expected_id)) # Repeat full metadata check on list snapshot.
 def tag_absent(path):
     # Exact-ref GET, not prefix matching/pagination. Fail closed on any tag,
     # including one created concurrently after preflight. Never alter the ref.
@@ -68,7 +78,7 @@ def main():
     elif mode=='page':print(page(read(sys.argv[2],1048576)))
     elif mode=='inventory':inventory([read(p,1048576) for p in sys.argv[2:]],v)
     elif mode=='after-inventory':
-        require(re.fullmatch('[1-9][0-9]*',sys.argv[2]));inventory([read(p,1048576) for p in sys.argv[3:]],v,sys.argv[2])
+        require(re.fullmatch('[1-9][0-9]*',sys.argv[2]));post_inventory([read(p,1048576) for p in sys.argv[3:]],v,sha,sys.argv[2])
     elif mode=='tag-absent':tag_absent(sys.argv[2])
     elif mode=='main':
         d=read(sys.argv[2]);require(isinstance(d,dict) and d.get('ref')=='refs/heads/main' and d.get('object',{}).get('sha')==sha)
@@ -77,5 +87,7 @@ def main():
     else:require(False)
 if __name__=='__main__':
     try:main()
+    except RetryableVisibility:
+        print('New draft not yet visible in otherwise valid complete inventory; read-only verification may be retried within its bound.',file=sys.stderr);sys.exit(75)
     except Exception:
         print('Draft creation checks failed. Do not retry blindly: inspect whether the draft already exists. No publication or overwrite is performed.',file=sys.stderr);sys.exit(1)
