@@ -5,19 +5,24 @@ from pathlib import Path
 import re
 import sys
 REPO='summer02020925/pipi-manual-updates'
-def require(ok):
-    if not ok: raise ValueError('Draft verification failed')
+CODES=frozenset({'unspecified','duplicate-json-key','file-bounds','version-format','version-range','page-shape','pagination-incomplete','release-id-format','duplicate-release-id','release-tag-format','release-flags','version-floor','existing-target','target-not-unique','expected-id-mismatch','target-not-draft','expected-id-renamed','response-shape','target-tag-mismatch','target-commit-mismatch','unexpected-publication','unexpected-assets','tag-response-format','tag-not-404'})
+class DraftCheckError(ValueError):
+    def __init__(self,code):
+        self.code=code if code in CODES else 'unspecified'
+        super().__init__('Draft verification failed')
+def require(ok,code='unspecified'):
+    if not ok: raise DraftCheckError(code)
 def unique(pairs):
     result={}
     for key,value in pairs:
-        require(key not in result);result[key]=value
+        require(key not in result,'duplicate-json-key');result[key]=value
     return result
 def read(path,limit=65536):
-    p=Path(path);require(not p.is_symlink() and p.is_file() and 0<p.stat().st_size<=limit)
+    p=Path(path);require(not p.is_symlink() and p.is_file() and 0<p.stat().st_size<=limit,'file-bounds')
     return json.loads(p.read_bytes(),object_pairs_hook=unique)
 def version(text):
-    require(isinstance(text,str) and re.fullmatch(r'(0|[1-9][0-9]{0,4})(\.(0|[1-9][0-9]{0,4})){3}',text))
-    parts=tuple(map(int,text.split('.')));require(all(p<=65535 for p in parts));return parts
+    require(isinstance(text,str) and re.fullmatch(r'(0|[1-9][0-9]{0,4})(\.(0|[1-9][0-9]{0,4})){3}',text),'version-format')
+    parts=tuple(map(int,text.split('.')));require(all(p<=65535 for p in parts),'version-range');return parts
 def request(data,env):
     require(env.get('GITHUB_REPOSITORY')==REPO and env.get('GITHUB_REF')=='refs/heads/main' and env.get('GITHUB_EVENT_NAME')=='push')
     sha=env.get('GITHUB_SHA','');require(re.fullmatch('[0-9a-f]{40}',sha))
@@ -26,27 +31,28 @@ def request(data,env):
     require(isinstance(data['nonce'],str) and re.fullmatch('[0-9a-f]{32}',data['nonce']))
     version(data['version']);return data['version'],sha
 def page(data):
-    require(isinstance(data,list) and len(data)<=10 and all(isinstance(x,dict) for x in data));return len(data)
+    require(isinstance(data,list) and len(data)<=10 and all(isinstance(x,dict) for x in data),'page-shape');return len(data)
 def inventory(pages,v,expected_id=None):
-    require(1<=len(pages)<=20 and all(page(p)==10 for p in pages[:-1]) and page(pages[-1])<10)
+    require(1<=len(pages)<=20 and all(page(p)==10 for p in pages[:-1]) and page(pages[-1])<10,'pagination-incomplete')
     seen=set();matches=[]
     for p in pages:
         for item in p:
-            ident=item.get('id');require(type(ident) is int and ident>0 and ident not in seen);seen.add(ident)
-            tag=item.get('tag_name');require(isinstance(tag,str))
-            require(type(item.get('draft')) is bool and type(item.get('prerelease')) is bool)
+            ident=item.get('id');require(type(ident) is int and ident>0,'release-id-format');require(ident not in seen,'duplicate-release-id');seen.add(ident)
+            tag=item.get('tag_name');require(isinstance(tag,str),'release-tag-format')
+            require(type(item.get('draft')) is bool and type(item.get('prerelease')) is bool,'release-flags')
             if tag=='v'+v:matches.append(item)
             if item.get('draft') is False and item.get('prerelease') is False:
-                require(tag.startswith('v'));require(version(tag[1:])<version(v))
-    if expected_id is None:require(not matches)
-    else:require(len(matches)==1 and matches[0].get('id')==int(expected_id) and matches[0].get('draft') is True)
+                require(tag.startswith('v'),'release-tag-format');require(version(tag[1:])<version(v),'version-floor')
+    if expected_id is None:require(not matches,'existing-target')
+    else:
+        require(len(matches)==1,'target-not-unique');require(matches[0].get('id')==int(expected_id),'expected-id-mismatch');require(matches[0].get('draft') is True,'target-not-draft')
 class RetryableVisibility(Exception):pass
 def post_inventory(pages,v,sha,expected_id):
     # First validate pagination/types/uniqueness/version floor without weakening any guard.
     matches=[item for p in pages for item in p if isinstance(item,dict) and item.get('tag_name')=='v'+v]
     if not matches:
         inventory(pages,v) # An otherwise-valid complete list, lacking only this new draft.
-        require(not any(item.get('id')==int(expected_id) for p in pages for item in p))
+        require(not any(item.get('id')==int(expected_id) for p in pages for item in p),'expected-id-renamed')
         raise RetryableVisibility()
     inventory(pages,v,expected_id)
     created(matches[0],v,sha,str(expected_id)) # Repeat full metadata check on list snapshot.
@@ -55,19 +61,19 @@ def tag_absent(path):
     # including one created concurrently after preflight. Never alter the ref.
     p=Path(path);require(not p.is_symlink() and p.is_file() and 0<p.stat().st_size<=65536)
     raw=p.read_bytes();parts=re.split(br'\r?\n\r?\n',raw,maxsplit=1)
-    require(len(parts)==2)
+    require(len(parts)==2,'tag-response-format')
     status=re.fullmatch(br'HTTP/[^ ]+ ([0-9]{3})(?: [^\r\n]*)?',parts[0].splitlines()[0])
-    require(status is not None and status.group(1)==b'404')
+    require(status is not None,'tag-response-format');require(status.group(1)==b'404','tag-not-404')
     body=json.loads(parts[1],object_pairs_hook=unique)
     require(isinstance(body,dict) and body.get('message')=='Not Found')
 def payload(v,sha):
     version(v);require(re.fullmatch('[0-9a-f]{40}',sha))
     return dict(tag_name='v'+v,target_commitish=sha,name='v'+v,body='Empty reviewed release draft; no package or signature published.',draft=True,prerelease=False,make_latest='false',generate_release_notes=False)
 def created(data,v,sha,expected=None):
-    require(isinstance(data,dict) and type(data.get('id')) is int and data['id']>0)
-    require(data.get('draft') is True and data.get('prerelease') is False and data.get('tag_name')=='v'+v)
-    require(data.get('target_commitish')==sha and data.get('published_at') is None and data.get('assets')==[])
-    if expected is not None:require(str(data['id'])==expected)
+    require(isinstance(data,dict) and type(data.get('id')) is int and data['id']>0,'response-shape')
+    require(data.get('draft') is True and data.get('prerelease') is False,'target-not-draft');require(data.get('tag_name')=='v'+v,'target-tag-mismatch')
+    require(data.get('target_commitish')==sha,'target-commit-mismatch');require(data.get('published_at') is None,'unexpected-publication');require(data.get('assets')==[],'unexpected-assets')
+    if expected is not None:require(str(data['id'])==expected,'expected-id-mismatch')
     return str(data['id'])
 def main():
     mode=sys.argv[1];env=os.environ
@@ -89,5 +95,7 @@ if __name__=='__main__':
     try:main()
     except RetryableVisibility:
         print('New draft not yet visible in otherwise valid complete inventory; read-only verification may be retried within its bound.',file=sys.stderr);sys.exit(75)
+    except DraftCheckError as error:
+        print('Draft creation checks failed. code='+error.code+'. Inspect existing draft; no mutation is retried.',file=sys.stderr);sys.exit(1)
     except Exception:
-        print('Draft creation checks failed. Do not retry blindly: inspect whether the draft already exists. No publication or overwrite is performed.',file=sys.stderr);sys.exit(1)
+        print('Draft creation checks failed. code=unexpected-runtime. Do not retry blindly: inspect whether the draft already exists. No publication or overwrite is performed.',file=sys.stderr);sys.exit(1)
