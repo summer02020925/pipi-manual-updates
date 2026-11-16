@@ -1,9 +1,0 @@
-{
-  "schema": 1,
-  "nonce": "e841cce41cad42cb943a3f3415a00042",
-  "version": "0.3.0.41",
-  "staging_commit": "07cde762523d3163f015ed5eac04e544ce82d572",
-  "blob_sha": "d3f3a11d3a2a78cb8f7326f9c985065a0046aa1c",
-  "package_sha256": "c5dfaf0a2af34d24ad204ac3c199cb54fd8cbf57249f5f96d95e62e60e52bc15",
-  "package_size": 451170
-}
