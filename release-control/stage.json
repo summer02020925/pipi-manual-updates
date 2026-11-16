@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "nonce": "0331b651a268477ea6e3d43fbf54919c",
-  "version": "0.3.0.22",
-  "staging_commit": "4c8bd29ab4ad949d64164cce07b204ccfa91a7e0",
-  "blob_sha": "0823cbd7f15247c722cc588970a886266bbce773",
-  "package_sha256": "4b8bdebb6f6ff5c67b58f293108e738975bf6320b92c134530b2843442f5e499",
-  "package_size": 344073
+  "nonce": "6aacb2b455f04eb1bd44ae206c5eb46c",
+  "version": "0.3.0.23",
+  "staging_commit": "226a3f95ee4079a18b751b367d15dffb15169754",
+  "blob_sha": "226d16c50fd389e2c5554044667f33d534006f82",
+  "package_sha256": "a7fb4a48adc4896e88cc0a8e57cb83fb644485d833710a0375d12cde292bc702",
+  "package_size": 349985
 }
