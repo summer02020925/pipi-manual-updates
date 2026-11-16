@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import sys
 REPO='summer02020925/pipi-manual-updates'
-CODES=frozenset({'unspecified','duplicate-json-key','file-bounds','version-format','version-range','page-shape','pagination-incomplete','release-id-format','duplicate-release-id','release-tag-format','release-flags','version-floor','existing-target','target-not-unique','expected-id-mismatch','target-not-draft','expected-id-renamed','response-shape','target-tag-mismatch','target-commit-mismatch','unexpected-publication','unexpected-assets','tag-response-format','tag-not-404'})
+CODES=frozenset({'unspecified','duplicate-json-key','file-bounds','version-format','version-range','page-shape','pagination-incomplete','release-id-format','duplicate-release-id','duplicate-release-conflict','release-tag-format','release-flags','version-floor','existing-target','target-not-unique','expected-id-mismatch','target-not-draft','expected-id-renamed','response-shape','target-tag-mismatch','target-commit-mismatch','unexpected-publication','unexpected-assets','tag-response-format','tag-not-404'})
 class DraftCheckError(ValueError):
     def __init__(self,code):
         self.code=code if code in CODES else 'unspecified'
@@ -47,7 +47,30 @@ def inventory(pages,v,expected_id=None):
     else:
         require(len(matches)==1,'target-not-unique');require(matches[0].get('id')==int(expected_id),'expected-id-mismatch');require(matches[0].get('draft') is True,'target-not-draft')
 class RetryableVisibility(Exception):pass
+class RetryableDuplicate(Exception):pass
 def post_inventory(pages,v,sha,expected_id):
+    # Retry only a complete list with byte-equivalent JSON objects for repeated IDs.
+    # Validate every remaining predicate before classifying the duplicate as transient.
+    require(1<=len(pages)<=20 and all(page(p)==10 for p in pages[:-1]) and page(pages[-1])<10,'pagination-incomplete')
+    seen={};origins={};rows=[];duplicate=False
+    for index,batch in enumerate(pages):
+        local_seen=set()
+        for item in batch:
+            ident=item.get('id');require(type(ident) is int and ident>0,'release-id-format')
+            require(ident not in local_seen,'duplicate-release-id');local_seen.add(ident)
+            require(type(item.get('draft')) is bool and type(item.get('prerelease')) is bool,'release-flags')
+            if ident in seen:
+                require(origins[ident]!=index,'duplicate-release-id')
+                require(json.dumps(item,sort_keys=True,allow_nan=False)==json.dumps(seen[ident],sort_keys=True,allow_nan=False),'duplicate-release-conflict');duplicate=True
+            else:seen[ident]=item;origins[ident]=index;rows.append(item)
+    if duplicate:
+        normalized=[rows[i:i+10] for i in range(0,len(rows),10)]
+        if not normalized or len(normalized[-1])==10:normalized.append([])
+        try: _post_inventory_strict(normalized,v,sha,expected_id)
+        except RetryableVisibility: pass # Missing exact ID/tag is independently retryable.
+        raise RetryableDuplicate()
+    _post_inventory_strict(pages,v,sha,expected_id)
+def _post_inventory_strict(pages,v,sha,expected_id):
     # First validate pagination/types/uniqueness/version floor without weakening any guard.
     matches=[item for p in pages for item in p if isinstance(item,dict) and item.get('tag_name')=='v'+v]
     if not matches:
@@ -93,6 +116,8 @@ def main():
     else:require(False)
 if __name__=='__main__':
     try:main()
+    except RetryableDuplicate:
+        print('Complete inventory contains consistent duplicate release IDs; bounded full read-only recheck required.',file=sys.stderr);sys.exit(75)
     except RetryableVisibility:
         print('New draft not yet visible in otherwise valid complete inventory; read-only verification may be retried within its bound.',file=sys.stderr);sys.exit(75)
     except DraftCheckError as error:
