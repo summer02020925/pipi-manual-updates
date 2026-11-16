@@ -85,14 +85,14 @@ jobs:
               break
             else
               verification_status=$?
-              # Only a complete, valid inventory temporarily missing this exact new draft is retryable.
-              # Auth errors, tag existence, duplicate IDs, wrong target/assets/version all stop immediately.
+              # Only complete otherwise-valid missing-draft or consistent duplicate-ID snapshots are retryable.
+              # Conflicting duplicate metadata, auth errors, existing tags, wrong target/assets/version stop immediately.
               if [ "$verification_status" -ne 75 ] || [ "$attempt" -eq 4 ]; then
                 echo 'Post-create verification did not succeed; retain draft for inspection. No POST retry.' >&2
                 exit 1
               fi
               phase=visibility-backoff
-              printf 'Retrying read-only post-create visibility check, attempt %s of 4.\n' "$((attempt+1))"
+              printf 'Retrying complete read-only post-create check, attempt %s of 4.\n' "$((attempt+1))"
               sleep "$((1 << (attempt-1)))"
             fi
           done
