@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "nonce": "453edebfa3236d4ff10af7e6c4140073",
-  "version": "0.3.0.71",
-  "package_sha256": "453edebfa3236d4ff10af7e6c414b97e0fde5b18bf66bdbd61e16388becf3913",
-  "package_size": 547573,
-  "release_id": 449920811
+  "nonce": "0e7e71b999a8b05674aa707782b80074",
+  "version": "0.3.0.72",
+  "package_sha256": "0e7e71b999a8b05674aa707782b874abe57ba8a8d32221774fd004e5212f7f00",
+  "package_size": 548333,
+  "release_id": 449943339
 }
